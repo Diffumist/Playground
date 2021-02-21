@@ -1,5 +1,22 @@
 use std::error::Error;
+use reqwest;
 use teloxide::{prelude::*, types::ParseMode::MarkdownV2, utils::command::BotCommand};
+
+pub async fn pixiv_search(query: &str) -> Result<String, Box<dyn Error>> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.pixiv.net/v1/search/illust?word={}&per_page=1", query);
+    let res = client.get(&url).send()?.text()?;
+    let json: serde_json::Value = serde_json::from_str(&res)?;
+    let url = json["response"]["docs"][0]["urls"]["original"].as_str().unwrap();
+    Ok(url.to_string())
+}
+pub async fn download_image(url: &str) -> Result<(), Box<dyn Error>> {
+    let client = reqwest::Client::new();
+    let res = client.get(url).send()?;
+    let mut file = std::fs::File::create("image.png")?;
+    res.copy_to(&mut file)?;
+    Ok(())
+}
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
@@ -10,7 +27,7 @@ enum Command {
     Help,
 }
 
-async fn answer(
+async fn message(
     cx: UpdateWithCx<AutoSend<Bot>, Message>,
     command: Command,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -20,12 +37,7 @@ async fn answer(
         }
 
         Command::Help => {
-            cx.reply_to(format!(
-                "I am a bot made by [Diffumist](https://t.me/Diffumist) in [rust](https://www.rust-lang.org/)
-_Here's a list of my commands:_
-`/help` _Display this text_
-`/start` _Shows bot info_")
-            ).disable_web_page_preview(true).parse_mode(MarkdownV2).await?
+            cx.reply_to(format!()).disable_web_page_preview(true).parse_mode(MarkdownV2).await?
         }
 
     };
@@ -45,5 +57,5 @@ async fn run() {
     let bot = Bot::from_env().auto_send();
 
     let bot_name: String = "Dmist_bot".to_string();
-    teloxide::commands_repl(bot, bot_name, answer).await;
+    teloxide::commands_repl(bot, bot_name, message).await;
 }
