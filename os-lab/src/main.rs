@@ -12,7 +12,6 @@ mod sbi;
 
 // global_asm!(include_str!("entry.asm"));
 
-
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
