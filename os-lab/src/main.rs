@@ -1,57 +1,41 @@
 #![no_std]
 #![no_main]
-// #![feature(global_asm)]
-#![feature(asm)]
+#![feature(global_asm)]
 #![feature(llvm_asm)]
-
-use crate::sbi::shutdown;
-use core::fmt::{Arguments, Result, Write};
-use core::panic::PanicInfo;
+#![feature(panic_info_message)]
 
 mod sbi;
 
-// global_asm!(include_str!("entry.asm"));
+use core::panic::PanicInfo;
+use core::fmt::{self, Write};
+use sbi::shutdown;
 
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
-
-const SYSCALL_EXIT: usize = 93;
-
-fn syscall(id: usize, args: [usize; 3]) -> isize {
-    let mut ret;
-    unsafe {
-        asm!(
-            "ecall",
-            inlateout("x10") args[0] => ret,
-            in("x11") args[1],
-            in("x12") args[2],
-            in("x17") id,
-        );
-    }
-    ret
-}
+global_asm!(include_str!("entry.asm"));
 
 const SYSCALL_WRITE: usize = 64;
 
 pub fn sys_write(fd: usize, buffer: &[u8]) -> isize {
-    syscall(SYSCALL_WRITE, [fd, buffer.as_ptr() as usize, buffer.len()])
+  syscall(SYSCALL_WRITE, [fd, buffer.as_ptr() as usize, buffer.len()])
 }
+// std println macro
 struct Stdout;
+const SBI_CONSOLE_PUTCHAR: usize = 1;
+
+pub fn console_putchar(c: usize) {
+    syscall(SBI_CONSOLE_PUTCHAR, [c, 0, 0]);
+}
 
 impl Write for Stdout {
-    fn write_str(&mut self, s: &str) -> Result {
-        sys_write(1, s.as_bytes());
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for c in s.chars() {
+            console_putchar(c as usize);
+        }
         Ok(())
     }
 }
 
-pub fn print(args: Arguments) {
+pub fn print(args: fmt::Arguments) {
     Stdout.write_fmt(args).unwrap();
-}
-pub fn sys_exit(xstate: i32) -> isize {
-    syscall(SYSCALL_EXIT, [xstate as usize, 0, 0])
 }
 
 #[macro_export]
@@ -68,37 +52,49 @@ macro_rules! println {
     }
 }
 
-pub fn console_putchar(ch: u8) {
-    let _ret: usize;
-    let arg0: usize = ch as usize;
-    let arg1: usize = 0;
-    let arg2: usize = 0;
-    let which: usize = 1;
+const SYSCALL_EXIT: usize = 93;
+
+fn syscall(id: usize, args: [usize; 3]) -> isize {
+    let mut ret: isize;
     unsafe {
         llvm_asm!("ecall"
-             : "={x10}" (_ret)
-             : "{x10}" (arg0), "{x11}" (arg1), "{x12}" (arg2), "{x17}" (which)
-             : "memory"
-             : "volatile"
+            : "={x10}" (ret)
+            : "{x10}" (args[0]), "{x11}" (args[1]), "{x12}" (args[2]), "{x17}" (id)
+            : "memory"
+            : "volatile"
         );
     }
+    ret
 }
-#[no_mangle]
-// fn clear_bss() {
-//     extern "C" {
-//         fn sbss();
-//         fn ebss();
-//     }
-//     (sbss as usize..ebss as usize).for_each(|a| unsafe { (a as *mut u8).write_volatile(0) });
-// }
-// pub fn rust_main() {
-//     clear_bss();
-//     shutdown();
-// }
-pub extern "C" fn rust_main() -> ! {
-    console_putchar(b'O');
-    console_putchar(b'K');
-    console_putchar(b'\n');
 
-    loop {}
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    if let Some(location) = info.location() {
+        println!("Panicked at {}:{} {}", location.file(), location.line(), info.message().unwrap());
+    } else {
+        println!("Panicked: {}", info.message().unwrap());
+    }
+    shutdown()
+}
+
+pub fn sys_exit(xstate: i32) -> isize {
+    syscall(SYSCALL_EXIT, [xstate as usize, 0, 0])
+}
+
+#[no_mangle]
+// clean bss section
+fn clear_bss() {
+    extern "C" {
+        fn sbss();
+        fn ebss();
+    }
+    (sbss as usize..ebss as usize).for_each(|a| {
+        unsafe { (a as *mut u8).write_volatile(0) }
+    });
+}
+
+#[no_mangle]
+fn rust_main() -> ! {
+    println!("Hello World!\n");
+    panic!("It should shutdown!");
 }
